@@ -24,3 +24,13 @@ state the EV SIM is in.
 To change states, simply send the single character "A", "B", "C" or "D". State A's impedance is infinite, state B is
 2.7 kΩ, state C is 882 Ω and state D is 240 Ω. These are supposed to correspond to positive peak voltages of +12, +9,
 +6 and +3 volts, respectively.
+
+## Arduino LCD variants
+
+The EV_Sim and EV_Sim_84 directories have Arduino sketches for the LCD-bearing hardware variants. The EV_Sim_84 directory
+is for the ATTiny84 backpack variant that has the LCD directly connected and uses LiquidCrystal. The EV_Sim directory
+is for the older ATTiny85 variant that uses either serial output or an i2c connected LCD backpack (either the Adafruit
+or OpenEVSE versions work).
+
+Either requires that support for "bare" ATTiny chips be added to your Arduino IDE. Be sure to configure Arduino and fuse
+your chip for the 16 MHz crystal.
