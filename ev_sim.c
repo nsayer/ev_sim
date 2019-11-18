@@ -229,7 +229,7 @@ void __ATTR_NORETURN__ main() {
     tx_pstr(PSTR(", high_adc="));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), high_analog);
     tx_str(pbuf);
-    tx_pstr(PSTR("}\r\n"));
+    tx_pstr(PSTR(" }\r\n"));
     
   }
   __builtin_unreachable();
