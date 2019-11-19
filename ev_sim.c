@@ -199,8 +199,7 @@ void __ATTR_NORETURN__ main() {
       if (analog > high_analog) high_analog = analog;
       if (analog < low_analog) low_analog = analog;
 
-      unsigned int state;
-      state = (analog < ANALOG_STATE_TRANSITION_LEVEL)?0:1;
+      uint8_t state = (analog < ANALOG_STATE_TRANSITION_LEVEL)?0:1;
 
       if (state == 0)
         low_count++;
