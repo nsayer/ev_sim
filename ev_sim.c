@@ -145,6 +145,7 @@ void __ATTR_NORETURN__ main() {
   PORTA = 0; // turn all outputs off
   DDRB = 0; // RX pin is input
   DDRA = _BV(R0_PIN) | _BV(R1_PIN) | _BV(R2_PIN) | _BV(7); // mode pins and tx output
+  PUEA = _BV(4) | _BV(5) | _BV(6); // pull-ups for the unused pins on port A.
 
   ADMUXA = _BV(MUX0); // input 1, single-ended
   ADMUXB = 0; // Vcc AREF, gain 1
