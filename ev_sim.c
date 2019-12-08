@@ -53,6 +53,8 @@ volatile uint8_t tx_head, tx_tail;
 
 volatile uint64_t ticks_cnt;
 
+volatile uint8_t state;
+
 ISR(TIMER0_COMPA_vect) {
   ticks_cnt++;
 }
@@ -112,23 +114,27 @@ ISR(USART0_RX_vect) {
   switch(c) {
     case 'A':
     case 'a':
+      state = 'A';
       // All 3 off
       PORTA &= ~( _BV(R0_PIN) | _BV(R1_PIN) | _BV(R2_PIN) );
       break;
     case 'B':
     case 'b':
+      state = 'B';
       // R0 on, the others off
       PORTA |= _BV(R0_PIN);
-      PORTA &= ( _BV(R1_PIN) | _BV(R2_PIN) );
+      PORTA &= ~( _BV(R1_PIN) | _BV(R2_PIN) );
       break;
     case 'C':
     case 'c':
+      state = 'C';
       // R0 & R1 on, R2 off
       PORTA |= _BV(R0_PIN) | _BV(R1_PIN);
-      PORTA &= _BV(R2_PIN);
+      PORTA &= ~_BV(R2_PIN);
       break;
     case 'D':
     case 'd':
+      state = 'D';
       // All on
       PORTA |= _BV(R0_PIN) | _BV(R1_PIN) | _BV(R2_PIN);
       break;
@@ -174,6 +180,8 @@ void __ATTR_NORETURN__ main() {
   
   tx_head = tx_tail = 0; // point to the start of the buffer.
 
+  state = 'A';
+
   sei(); // release the hounds!
 
   while(1) {
@@ -214,7 +222,10 @@ void __ATTR_NORETURN__ main() {
     }
 
     char pbuf[20];
-    tx_pstr(PSTR("{ state_changes="));
+    tx_pstr(PSTR("{ state="));
+    snprintf_P(pbuf, sizeof(pbuf), PSTR("%c"), state);
+    tx_str(pbuf);
+    tx_pstr(PSTR(", state_changes="));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), state_changes);
     tx_str(pbuf);
     tx_pstr(PSTR(", low_count="));
