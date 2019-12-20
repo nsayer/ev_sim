@@ -5,7 +5,7 @@ This is the source code for the EV Sim Remote version of https://hackaday.io/pro
 You connect your computer up to the USB port and you'll see a serial port. Open this port and configure it for 9600
 baud, 8N1. You'll start getting JSON frames that look like this:
 
-{ state=A, state_changes=2000, low_count=50000, high_count=100000, low_adc=172, high_adc=844 }
+{ state="A", state_changes=2000, low_count=50000, high_count=100000, low_adc=172, high_adc=844 }
 
 This represents the raw data for 1 second of sampling of the pilot. "state" is the simulated vehicle's state - A through
 D. This is changed by sending the single characters A through D to the sim. "state changes" is the number of times the pilot
