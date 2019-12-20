@@ -222,22 +222,22 @@ void __ATTR_NORETURN__ main() {
     }
 
     char pbuf[20];
-    tx_pstr(PSTR("{ state=\""));
+    tx_pstr(PSTR("{ state: \""));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%c"), state);
     tx_str(pbuf);
-    tx_pstr(PSTR("\", state_changes="));
+    tx_pstr(PSTR("\", state_changes: "));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), state_changes);
     tx_str(pbuf);
-    tx_pstr(PSTR(", low_count="));
+    tx_pstr(PSTR(", low_count: "));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), low_count);
     tx_str(pbuf);
-    tx_pstr(PSTR(", high_count="));
+    tx_pstr(PSTR(", high_count: "));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), high_count);
     tx_str(pbuf);
-    tx_pstr(PSTR(", low_adc="));
+    tx_pstr(PSTR(", low_adc: "));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), low_analog);
     tx_str(pbuf);
-    tx_pstr(PSTR(", high_adc="));
+    tx_pstr(PSTR(", high_adc: "));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), high_analog);
     tx_str(pbuf);
     tx_pstr(PSTR(" }\r\n"));
