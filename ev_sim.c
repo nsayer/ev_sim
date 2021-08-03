@@ -68,7 +68,7 @@
 #endif
 
 // How long (in ticks) do we sample?
-#define SAMPLE_TICKS (1000UL)
+#define SAMPLE_TICKS (500UL)
 
 // Where is the separation between the pilot being "high" and "low"?
 #define ANALOG_STATE_TRANSITION_LEVEL 556
@@ -296,8 +296,12 @@ void __ATTR_NORETURN__ main() {
 #ifdef USE_AC
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
       changes_save = state_changes;
-      hi_save = hi_period;
-      lo_save = lo_period;
+      if (changes_save == 0) {
+        hi_save = lo_save = 0; // duty cycle makes no sense
+      } else {
+        hi_save = hi_period;
+        lo_save = lo_period;
+      }
     }
 #endif
     char pbuf[20];
