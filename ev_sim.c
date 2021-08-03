@@ -160,13 +160,25 @@ ISR(USART0_RX_vect) {
   }
 }
 
-volatile uint32_t hi_count, lo_count, state_changes;
+volatile uint16_t last_capture, hi_period, lo_period, state_changes;
 
 #ifdef USE_AC  
 ISR(ANA_COMP0_vect) {
-  //ACSR0A |= _BV(ACI0); // clear the interrupt
+  uint16_t capture = ICR1;
+  uint16_t delta = capture - last_capture;
+  last_capture = capture;
 
-  //uint8_t state = (ACSR0A & _BV(ACO0)) != 0;
+  uint8_t state = (ACSR0A & _BV(ACO0)) != 0;
+
+  if (state) {
+    lo_period = delta; // If high, we just measured the *low* period.
+    TCCR1B &= ~_BV(ICES1); // now look for the falling edge
+  } else {
+    hi_period = delta;
+    TCCR1B |= _BV(ICES1);
+  }
+
+  TIFR1 = _BV(ICF1); // clear the capture flag
 
   // we have hysteresis, so we _know_ this means we had a _real_ change.
   state_changes++;
@@ -178,7 +190,11 @@ void __ATTR_NORETURN__ main() {
   wdt_enable(WDTO_1S);
 
   // We use USART0, Timer 0 and the ADC.
+#ifdef USE_AC
+  PRR = _BV(PRTWI) | _BV(PRUSART1) | _BV(PRSPI) | _BV(PRTIM2);
+#else
   PRR = _BV(PRTWI) | _BV(PRUSART1) | _BV(PRSPI) | _BV(PRTIM2) | _BV(PRTIM1);
+#endif
 
   PORTA = 0; // turn all outputs off
   DDRB = 0; // RX pin is input
@@ -200,12 +216,17 @@ void __ATTR_NORETURN__ main() {
 #endif
 
 #ifdef USE_AC
-  ACSR0A = _BV(ACIE0); // positive input is AIN00, enable interrupts
+  ACSR0A = _BV(ACIE0) | _BV(ACIC0); // positive input is AIN00, enable interrupts, trigger timer capture
   ACSR0B = _BV(HSEL0) | _BV(HLEV0); // Negative input is AIN01, high hysteresis
 #else
   ACSR0A = _BV(ACD0); // disable AC
 #endif
 
+#ifdef USE_AC
+  TCCR1A = 0; // No special modes
+  TCCR1B = _BV(CS10); // No prescale, no special modes
+#endif
+  
   UCSR0A = 0;
   UCSR0B = _BV(RXCIE0) | _BV(RXEN0) | _BV(TXEN0); // Interrupt on receive
   UCSR0C = _BV(UCSZ01) | _BV(UCSZ00); // 8N1
@@ -258,12 +279,12 @@ void __ATTR_NORETURN__ main() {
       if (analog > high_analog) high_analog = analog;
       if (analog < low_analog) low_analog = analog;
 
+#ifndef USE_AC
       int state = analog > ANALOG_STATE_TRANSITION_LEVEL;
       if (state)
 	hi_save++;
       else
         lo_save++;
-#ifndef USE_AC
       if (state != last_state) {
 	changes_save++;
         last_state = state;
@@ -275,6 +296,8 @@ void __ATTR_NORETURN__ main() {
 #ifdef USE_AC
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
       changes_save = state_changes;
+      hi_save = hi_period;
+      lo_save = lo_period;
     }
 #endif
     char pbuf[20];
