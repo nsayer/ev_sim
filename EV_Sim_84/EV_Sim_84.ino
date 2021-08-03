@@ -193,7 +193,7 @@ static inline int scale_mv(unsigned int value) {
 #ifdef USE_AC
 volatile unsigned long state_changes;
 ISR(ANA_COMP_vect) {
-  int state = (ACSR & _BV(ACO)) != 0;
+  //int state = (ACSR & _BV(ACO)) != 0;
 
   state_changes++;
 }
