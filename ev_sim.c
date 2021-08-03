@@ -29,6 +29,9 @@
 #include <string.h>
 #include <stdint.h>
 
+// Define this for v2.1 hardware
+#define USE_AC
+
 // CPU frequency - 16 MHz
 #define F_CPU (16000000UL)
 
@@ -37,10 +40,32 @@
 
 #include <util/setbaud.h>
 
+// Note that some versions of the AVR LIBC forgot to
+// define the individual PUExn bit numbers.
+#ifndef PUEA0
+#define PUEA0 0
+#define PUEA1 1
+#define PUEA2 2
+#define PUEA3 3
+#define PUEA4 4
+#define PUEA5 5
+#define PUEA6 6
+#define PUEA7 7
+#define PUEB0 0
+#define PUEB1 1
+#define PUEB2 2
+#define PUEB3 3
+#endif
+
 // R0 is the 2.7k resistor, R1 is the 1.3k and R2 is the 330 ohm one.
 #define R0_PIN (0)
+#ifdef USE_AC
+#define R1_PIN (3)
+#define R2_PIN (4)
+#else
 #define R1_PIN (2)
 #define R2_PIN (3)
+#endif
 
 // How long (in ticks) do we sample?
 #define SAMPLE_TICKS (1000UL)
@@ -115,31 +140,38 @@ ISR(USART0_RX_vect) {
     case 'A':
     case 'a':
       state = 'A';
-      // All 3 off
-      PORTA &= ~( _BV(R0_PIN) | _BV(R1_PIN) | _BV(R2_PIN) );
+      PORTA = 0; // Disconnected
       break;
     case 'B':
     case 'b':
       state = 'B';
-      // R0 on, the others off
-      PORTA |= _BV(R0_PIN);
-      PORTA &= ~( _BV(R1_PIN) | _BV(R2_PIN) );
+      PORTA = _BV(R0_PIN); // Vehicle present
       break;
     case 'C':
     case 'c':
       state = 'C';
-      // R0 & R1 on, R2 off
-      PORTA |= _BV(R0_PIN) | _BV(R1_PIN);
-      PORTA &= ~_BV(R2_PIN);
+      PORTA = _BV(R0_PIN) | _BV(R1_PIN); // Power requested
       break;
     case 'D':
     case 'd':
       state = 'D';
-      // All on
-      PORTA |= _BV(R0_PIN) | _BV(R1_PIN) | _BV(R2_PIN);
+      PORTA = _BV(R0_PIN) | _BV(R1_PIN) | _BV(R2_PIN); // Ventilation requested
       break;
   }
 }
+
+volatile uint32_t hi_count, lo_count, state_changes;
+
+#ifdef USE_AC  
+ISR(ANA_COMP0_vect) {
+  //ACSR0A |= _BV(ACI0); // clear the interrupt
+
+  //uint8_t state = (ACSR0A & _BV(ACO0)) != 0;
+
+  // we have hysteresis, so we _know_ this means we had a _real_ change.
+  state_changes++;
+}
+#endif
 
 void __ATTR_NORETURN__ main() {
 
@@ -151,13 +183,28 @@ void __ATTR_NORETURN__ main() {
   PORTA = 0; // turn all outputs off
   DDRB = 0; // RX pin is input
   DDRA = _BV(R0_PIN) | _BV(R1_PIN) | _BV(R2_PIN) | _BV(7); // mode pins and tx output
-  PUEA = _BV(4) | _BV(5) | _BV(6); // pull-ups for the unused pins on port A.
+#ifdef USE_AC
+  PUEA = _BV(PUEA5) | _BV(PUEA6); // pull-ups for the unused pins on port A.
+#else
+  PUEA = _BV(PUEA4) | _BV(PUEA5) | _BV(PUEA6); // pull-ups for the unused pins on port A.
+#endif
 
   ADMUXA = _BV(MUX0); // input 1, single-ended
   ADMUXB = 0; // Vcc AREF, gain 1
-  ADCSRA = _BV(ADEN) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0); // clock /128, enable
+  ADCSRA = _BV(ADEN) | _BV(ADPS2) | _BV(ADPS1); // clock /64, enable
   ADCSRB = 0;
-  DIDR0 = _BV(ADC1D); // ADC 0 is analog
+#ifdef USE_AC
+  DIDR0 = _BV(ADC1D) | _BV(ADC2D); // AIN00 / ADC1 & AIN01 is analog
+#else
+  DIDR0 = _BV(ADC1D); // AIN00 / ADC1 is analog
+#endif
+
+#ifdef USE_AC
+  ACSR0A = _BV(ACIE0); // positive input is AIN00, enable interrupts
+  ACSR0B = _BV(HSEL0) | _BV(HLEV0); // Negative input is AIN01, high hysteresis
+#else
+  ACSR0A = _BV(ACD0); // disable AC
+#endif
 
   UCSR0A = 0;
   UCSR0B = _BV(RXCIE0) | _BV(RXEN0) | _BV(TXEN0); // Interrupt on receive
@@ -189,12 +236,15 @@ void __ATTR_NORETURN__ main() {
     uint16_t high_analog = 0;
     uint16_t low_analog = 0xffff;
 
-    // This is a little magical. By forcing one fake state change and setting the count to -1,
-    // we get the true number of state changes.
-    int32_t state_changes = -1;
-    uint32_t last_state = 99; // neither 0 nor 1
-
-    uint32_t low_count = 0, high_count = 0;
+#ifdef USE_AC
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+      state_changes = 0;
+    }
+#endif
+#ifndef USE_AC
+    uint32_t last_state = 99;
+#endif
+    uint32_t hi_save = 0, lo_save = 0, changes_save = -1;
     for(uint64_t now = ticks(); ticks() - now < SAMPLE_TICKS; ) {
       wdt_reset(); // pet the dog
 
@@ -208,31 +258,37 @@ void __ATTR_NORETURN__ main() {
       if (analog > high_analog) high_analog = analog;
       if (analog < low_analog) low_analog = analog;
 
-      uint8_t state = (analog < ANALOG_STATE_TRANSITION_LEVEL)?0:1;
-
-      if (state == 0)
-        low_count++;
+      int state = analog > ANALOG_STATE_TRANSITION_LEVEL;
+      if (state)
+	hi_save++;
       else
-        high_count++;
-      
+        lo_save++;
+#ifndef USE_AC
       if (state != last_state) {
-        state_changes++;
+	changes_save++;
         last_state = state;
       }
+#endif
+
     }
 
+#ifdef USE_AC
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+      changes_save = state_changes;
+    }
+#endif
     char pbuf[20];
     tx_pstr(PSTR("{ state: \""));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%c"), state);
     tx_str(pbuf);
     tx_pstr(PSTR("\", state_changes: "));
-    snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), state_changes);
+    snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), changes_save);
     tx_str(pbuf);
     tx_pstr(PSTR(", low_count: "));
-    snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), low_count);
+    snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), lo_save);
     tx_str(pbuf);
     tx_pstr(PSTR(", high_count: "));
-    snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), high_count);
+    snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), hi_save);
     tx_str(pbuf);
     tx_pstr(PSTR(", low_adc: "));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), low_analog);

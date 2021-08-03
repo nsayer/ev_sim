@@ -19,16 +19,9 @@
  */
 
 #include <Arduino.h>
+#include <util/atomic.h>
 
 #define VERSION "(84) 1.0"
-
-// The pins connected up to the LCD.
-#define LCD_D4 7
-#define LCD_D5 6
-#define LCD_D6 5
-#define LCD_D7 4
-#define LCD_RS 3
-#define LCD_E 1
 
 // Hardware versions prior to 4.0 use DIGITAL_SAMPLING. 4.0 and beyond use
 // analog.
@@ -45,6 +38,13 @@
 //#define DIGITAL_SAMPLING
 #define ANALOG_SAMPLING
 
+// Define this for hardware 4.1 This requires ANALOG_SAMPLING
+#define USE_AC
+
+#if !defined(ANALOG_SAMPLING) && defined(USE_AC)
+#error USE_AC requires ANALOG_SAMPLING
+#endif
+
 #if !defined(DIGITAL_SAMPLING) && !defined(ANALOG_SAMPLING)
 #error Well, you have to let me do it SOMEHOW...
 #endif
@@ -58,12 +58,26 @@
 // square wave sampling. This happens to be the 0 volt
 // level.
 #define ANALOG_STATE_TRANSITION_LEVEL 556
-// 3 volts (or so)
-//#define ANALOG_STATE_TRANSITION_LEVEL 685
 #endif
 
 #ifdef ANALOG_SAMPLING
+#ifdef USE_AC
+#define PILOT_ANALOG_SAMPLING_PIN 1
+#else
 #define PILOT_ANALOG_SAMPLING_PIN 2
+#endif
+#endif
+
+// The pins connected up to the LCD.
+#define LCD_D4 7
+#define LCD_D5 6
+#define LCD_D6 5
+#define LCD_D7 4
+#define LCD_RS 3
+#ifdef USE_AC
+#define LCD_E 0
+#else
+#define LCD_E 1
 #endif
 
 #define BUTTON_PIN 8
@@ -176,6 +190,15 @@ static inline int scale_mv(unsigned int value) {
 }
 #endif
 
+#ifdef USE_AC
+volatile unsigned long state_changes;
+ISR(ANA_COMP_vect) {
+  int state = (ACSR & _BV(ACO)) != 0;
+
+  state_changes++;
+}
+#endif
+
 void setup() {
 #ifdef DIGITAL_SAMPLING
   pinMode(PILOT_DIGITAL_SAMPLING_PIN, INPUT_PULLUP);
@@ -184,10 +207,19 @@ void setup() {
 #ifdef ANALOG_SAMPLING
   pinMode(PILOT_ANALOG_SAMPLING_PIN, INPUT);
   analogReference(DEFAULT);
+#ifdef USE_AC
+  DIDR0 = _BV(ADC1D) | _BV(ADC2D); // Turn off AIN0 & AIN1
+#else
+  DIDR0 = _BV(ADC1D); // Turn off the digital input on the analog pin
+#endif
 #endif
 
   // crank up the ADC clock.
   ADCSRA = _BV(ADEN) | _BV(ADPS2) | _BV(ADPS1);
+
+#ifdef USE_AC
+  ACSR = _BV(ACIE); // enable analog comparator interrupts
+#endif
     
   display.begin(16, 2);
   
@@ -203,9 +235,15 @@ void setup() {
 void loop() {
   static unsigned char mode = 0;
   unsigned int last_state = 99; // neither HIGH nor LOW
-  unsigned long high_count = 0, low_count = 0, state_changes = -1; // ignore the first change from "invalid"
+  unsigned long hi_save = 0, lo_save = 0, changes_save = -1; // ignore the first change from "invalid"
 #ifdef ANALOG_SAMPLING
   unsigned int high_analog=0, low_analog=0xffff;
+#endif
+
+#ifdef USE_AC
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    state_changes = 0;
+  }
 #endif
 
   for(unsigned long start_poll = millis(); millis() - start_poll < SAMPLE_PERIOD; ) {
@@ -232,26 +270,33 @@ void loop() {
 #endif
 
     if (state == LOW)    
-      low_count++;
+      lo_save++;
     else
-      high_count++;
+      hi_save++;
       
-    if (state != last_state) {
-      state_changes++;
-      last_state = state;
-    }
-
+#ifndef USE_AC
+      if (state != last_state) {
+        changes_save++;
+        last_state = state;
+      }
+#endif      
   }
-  
+
+#ifdef USE_AC
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    changes_save = state_changes;
+  }
+#endif
+
   char buf[32];
   unsigned long amps = 0;
-  if (state_changes == 0) {
-    sprintf(buf, P("   0 Hz     %s   "), (low_count>high_count)?"-":"+");
+  if (changes_save == 0) {
+    sprintf(buf, P("   0 Hz     %s   "), (lo_save>hi_save)?"-":"+");
   } else {
-    unsigned int duty = (high_count * 1000) / (high_count + low_count);
+    unsigned int duty = (hi_save * 1000) / (hi_save + lo_save);
     duty %= 1000; // turn 100% into 0% just for display purposes. A 100% duty cycle doesn't really make sense.
   
-    unsigned long frequency = ((state_changes / 2) * 1000) / SAMPLE_PERIOD;
+    unsigned long frequency = ((changes_save / 2) * 1000) / SAMPLE_PERIOD;
 
     amps = dutyToMA(duty);
 
@@ -280,4 +325,3 @@ void loop() {
   display.setCursor(0, 1);
   display.print(buf);
 }
-
