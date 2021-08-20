@@ -52,12 +52,14 @@
 #ifdef DIGITAL_SAMPLING
 #define PILOT_DIGITAL_SAMPLING_PIN  0
 #else
+#ifndef USE_AC
 // Since we're not going to use digital sampling,
 // we have to decide what constitutes a high and
 // what constitutes a low for the purposes of the
 // square wave sampling. This happens to be the 0 volt
 // level.
 #define ANALOG_STATE_TRANSITION_LEVEL 556
+#endif
 #endif
 
 #ifdef ANALOG_SAMPLING
@@ -191,9 +193,21 @@ static inline int scale_mv(unsigned int value) {
 #endif
 
 #ifdef USE_AC
-volatile unsigned long state_changes;
+volatile unsigned int state_changes, hi_period, lo_period, last_capture;
 ISR(ANA_COMP_vect) {
-  //int state = (ACSR & _BV(ACO)) != 0;
+  unsigned int capture = ICR1;
+  unsigned int delta = capture - last_capture;
+  last_capture = capture;
+  
+  int state = (ACSR & _BV(ACO)) != 0;
+
+  if (state) {
+    lo_period = delta; // if it's high, we just captured the low period
+    TCCR1B &= ~_BV(ICES1); // now look for the falling edge
+  } else {
+    hi_period = delta;
+    TCCR1B |= _BV(ICES1);
+  }
 
   state_changes++;
 }
@@ -218,7 +232,9 @@ void setup() {
   ADCSRA = _BV(ADEN) | _BV(ADPS2) | _BV(ADPS1);
 
 #ifdef USE_AC
-  ACSR = _BV(ACIE); // enable analog comparator interrupts
+  ACSR = _BV(ACIE) | _BV(ACIC); // enable analog comparator interrupts, use AC for input capture
+  TCCR1A = 0;
+  TCCR1B = _BV(CS11); // prescale by 1
 #endif
     
   display.begin(16, 2);
@@ -262,6 +278,7 @@ void loop() {
     if (analog < low_analog) low_analog = analog;
 #endif
 
+#ifndef USE_AC
     unsigned int state;
 #ifdef DIGITAL_SAMPLING    
     state = digitalRead(PILOT_DIGITAL_SAMPLING_PIN);
@@ -274,7 +291,6 @@ void loop() {
     else
       hi_save++;
       
-#ifndef USE_AC
       if (state != last_state) {
         changes_save++;
         last_state = state;
@@ -285,13 +301,21 @@ void loop() {
 #ifdef USE_AC
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
     changes_save = state_changes;
+    hi_save = hi_period;
+    lo_save = lo_period;
   }
 #endif
 
   char buf[32];
   unsigned long amps = 0;
   if (changes_save == 0) {
-    sprintf(buf, P("   0 Hz     %s   "), (lo_save>hi_save)?"-":"+");
+    sprintf(buf, P("   0 Hz     %s   "), 
+#ifdef USE_AC
+    ((ACSR & _BV(ACO)) == 0) // Actually ask the comparator. We can't count on the duty cycle system
+#else
+    (lo_save>hi_save)
+#endif
+    ?"-":"+");
   } else {
     unsigned int duty = (hi_save * 1000) / (hi_save + lo_save);
     duty %= 1000; // turn 100% into 0% just for display purposes. A 100% duty cycle doesn't really make sense.
