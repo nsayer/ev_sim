@@ -1,7 +1,7 @@
 /*
 
  EV Sim Remote
- Copyright 2019 Nicholas W. Sayer
+ Copyright 2021 Nicholas W. Sayer
  
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -70,8 +70,18 @@
 // How long (in ticks) do we sample?
 #define SAMPLE_TICKS (500UL)
 
+// The scaling array output in mv at 0V input
+#define OFFSET (2600)
+// The slope of the scale - about how many mv of input shift are
+// represented by each volt of ADC shift
+#define SCALE (6570L)
+
+#ifndef USE_AC
 // Where is the separation between the pilot being "high" and "low"?
+// 0 volts input is about 2.72v on the ADC, which at an AREF of about 5v
+// is...
 #define ANALOG_STATE_TRANSITION_LEVEL 556
+#endif
 
 volatile uint8_t tx_buf[128];
 volatile uint8_t tx_head, tx_tail;
@@ -185,6 +195,24 @@ ISR(ANA_COMP0_vect) {
 }
 #endif
 
+// Multiply this value by all ADC readings to properly scale them
+uint16_t vcc_mv;
+
+void calibrate_adc() {
+  ADMUXA = _BV(MUX3) | _BV(MUX2) | _BV(MUX0); // select the internal 1.1v ref
+  for(uint64_t now = ticks(); ticks() - now < 2;) ; // wait 2 ms
+  wdt_reset(); // just to be sure
+
+  ADCSRA |= _BV(ADSC); // start conversion
+  while(ADCSRA & _BV(ADSC)) ; // wait for it
+  uint16_t adc = ADC;
+  wdt_reset(); // just to be sure
+
+  vcc_mv = (uint16_t) ((1100L * 1023L) / adc);
+  
+  ADMUXA = _BV(MUX0); // put the mux back the way we found it
+}
+
 void __ATTR_NORETURN__ main() {
 
   wdt_enable(WDTO_1S);
@@ -254,8 +282,13 @@ void __ATTR_NORETURN__ main() {
 
   while(1) {
 
-    uint16_t high_analog = 0;
-    uint16_t low_analog = 0xffff;
+    // calibrate the ADC every 30 seconds
+    static uint8_t cycles = 0;
+    if (cycles == 0) calibrate_adc();
+    if (cycles++ >= 30) cycles = 0;
+
+    int16_t high_analog = -0x7fff;
+    int16_t low_analog = 0x7fff;
 
 #ifdef USE_AC
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
@@ -269,12 +302,9 @@ void __ATTR_NORETURN__ main() {
     for(uint64_t now = ticks(); ticks() - now < SAMPLE_TICKS; ) {
       wdt_reset(); // pet the dog
 
-      // read the ADC.
-      ADCSRA |= _BV(ADIF); // clear the complete flag
       ADCSRA |= _BV(ADSC); // start conversion
-      while(!(ADCSRA & _BV(ADIF))) ; // wait for it
-      uint16_t analog = ADC;
-      ADCSRA |= _BV(ADIF); // clear the complete flag for good measure
+      while(ADCSRA & _BV(ADSC)) ; // wait for it
+      int16_t analog = ADC; // read the result
 
       if (analog > high_analog) high_analog = analog;
       if (analog < low_analog) low_analog = analog;
@@ -304,6 +334,12 @@ void __ATTR_NORETURN__ main() {
       }
     }
 #endif
+    // now scale the mv input to mv output
+    high_analog = (int16_t)(((uint32_t)high_analog * (uint32_t)vcc_mv) / 1023L);
+    high_analog = (int16_t)(((high_analog - OFFSET) * SCALE) / 1000L);
+    low_analog = (int16_t)(((uint32_t)low_analog * (uint32_t)vcc_mv) / 1023L);
+    low_analog = (int16_t)(((low_analog - OFFSET) * SCALE) / 1000L);
+
     char pbuf[20];
     tx_pstr(PSTR("{ state: \""));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%c"), state);
@@ -317,11 +353,11 @@ void __ATTR_NORETURN__ main() {
     tx_pstr(PSTR(", high_count: "));
     snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), hi_save);
     tx_str(pbuf);
-    tx_pstr(PSTR(", low_adc: "));
-    snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), low_analog);
+    tx_pstr(PSTR(", min_volts: "));
+    snprintf_P(pbuf, sizeof(pbuf), PSTR("%d.%03d"), low_analog / 1000, abs(low_analog) % 1000);
     tx_str(pbuf);
-    tx_pstr(PSTR(", high_adc: "));
-    snprintf_P(pbuf, sizeof(pbuf), PSTR("%d"), high_analog);
+    tx_pstr(PSTR(", max_volts: "));
+    snprintf_P(pbuf, sizeof(pbuf), PSTR("%d.%03d"), high_analog / 1000, abs(high_analog) % 1000);
     tx_str(pbuf);
     tx_pstr(PSTR(" }\r\n"));
     
