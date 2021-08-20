@@ -76,7 +76,13 @@
 // represented by each volt of ADC shift
 #define SCALE (6570L)
 
-#ifndef USE_AC
+#ifdef USE_AC
+// Even with hysteresis turned on, we sometimes get way-too-short intervals.
+// If the AC returns an interval shorter than this, then it's just noise and we should ignore it.
+// The timer is running at 16 MHz, so this is a microsecond, or a tenth of a percent duty cycle.
+// The shortest legal duty cycle is 5%.
+#define NOISE_REDUCTION (16)
+#else
 // Where is the separation between the pilot being "high" and "low"?
 // 0 volts input is about 2.72v on the ADC, which at an AREF of about 5v
 // is...
@@ -177,6 +183,8 @@ ISR(ANA_COMP0_vect) {
   uint16_t capture = ICR1;
   uint16_t delta = capture - last_capture;
   last_capture = capture;
+
+  if (delta < NOISE_REDUCTION) return; // ignore this one
 
   uint8_t state = (ACSR0A & _BV(ACO0)) != 0;
 
