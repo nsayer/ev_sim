@@ -114,6 +114,14 @@
 #define PILOT_READ_OFFSET (-556)
 #endif
 
+#ifdef USE_AC
+// We sometimes get way-too-short intervals. If the AC returns an interval shorter than this, 
+// then it's just noise and we should ignore it.
+// The timer is running at 16 MHz, so this is a microsecond, or a tenth of a percent duty cycle.
+// The shortest legal duty cycle is 5%.
+#define NOISE_REDUCTION (16)
+#endif
+
 #include <LiquidCrystal.h>
 
 // Keep strings in PROGMEM. Copy them into this temp buffer just-in-time.
@@ -198,6 +206,8 @@ ISR(ANA_COMP_vect) {
   unsigned int capture = ICR1;
   unsigned int delta = capture - last_capture;
   last_capture = capture;
+
+  if (delta < NOISE_REDUCTION) return; // this interval is too short. Ignore it.
   
   int state = (ACSR & _BV(ACO)) != 0;
 
