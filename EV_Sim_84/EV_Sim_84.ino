@@ -110,8 +110,8 @@
 // Since a single A/D unit represents 4.88 mV, we can work out a formula to convert A/D readings
 // into millivolts of the actual pilot signal
 #ifdef ANALOG_SAMPLING
-#define PILOT_READ_SCALE 32
-#define PILOT_READ_OFFSET (-556)
+#define PILOT_READ_SCALE (6570L)
+#define PILOT_READ_OFFSET (2500)
 #endif
 
 #ifdef USE_AC
@@ -194,12 +194,6 @@ static inline char read_button() {
   }
 }
 
-#ifdef ANALOG_SAMPLING
-static inline int scale_mv(unsigned int value) {
-  return (((int)value) + PILOT_READ_OFFSET) * PILOT_READ_SCALE;
-}
-#endif
-
 #ifdef USE_AC
 volatile unsigned int state_changes, hi_period, lo_period, last_capture;
 ISR(ANA_COMP_vect) {
@@ -220,6 +214,30 @@ ISR(ANA_COMP_vect) {
   }
 
   state_changes++;
+}
+#endif
+
+#ifdef ANALOG_SAMPLING
+// Multiply this value by all ADC readings to properly scale them
+uint16_t vcc_mv;
+
+void calibrate_adc() {
+  ADMUX = _BV(MUX5) | _BV(MUX0); // select the internal 1.1v ref and Vcc ref
+  delay(2); // wait 2 ms
+
+  ADCSRA |= _BV(ADSC); // start conversion
+  while(ADCSRA & _BV(ADSC)) ; // wait for it
+  uint16_t adc = ADC;
+
+  vcc_mv = (uint16_t) ((1100L * 1023L) / adc);
+  
+  ADMUX = _BV(MUX0); // put the mux back the way we found it
+}
+
+static inline long scale_mv(unsigned int value) {
+  int mv = (int)((((long)value) * vcc_mv) / 1024L);
+  mv -= PILOT_READ_OFFSET;
+  return (mv * PILOT_READ_SCALE) / 1000L;
 }
 #endif
 
@@ -264,6 +282,9 @@ void loop() {
   unsigned long hi_save = 0, lo_save = 0, changes_save = -1; // ignore the first change from "invalid"
 #ifdef ANALOG_SAMPLING
   unsigned int high_analog=0, low_analog=0xffff;
+  static unsigned char cal_delay = 0;
+  if (cal_delay++ == 0) calibrate_adc();
+  if (cal_delay >= 30) cal_delay = 0; // calibrate every 30 sample periods.
 #endif
 
 #ifdef USE_AC
@@ -323,7 +344,7 @@ void loop() {
 #ifdef USE_AC
     ((ACSR & _BV(ACO)) == 0) // Actually ask the comparator. We can't count on the duty cycle system
 #else
-    (lo_save>hi_save)
+    (lo_save > hi_save)
 #endif
     ?"-":"+");
   } else {
@@ -349,9 +370,9 @@ void loop() {
       break;
 #ifdef ANALOG_SAMPLING
     case 1:
-      int low_mv = scale_mv(low_analog);
-      int high_mv = scale_mv(high_analog);
-      sprintf(buf,P(" %+03d.%01d  %+03d.%01d"), low_mv/1000, abs(low_mv % 1000) / 100, high_mv/1000, abs(high_mv % 1000) / 100);
+      long low_mv = scale_mv(low_analog);
+      long high_mv = scale_mv(high_analog);
+      sprintf(buf,P(" %+03ld.%01ld  %+03ld.%01ld"), low_mv/1000, abs(low_mv % 1000) / 100, high_mv/1000, abs(high_mv % 1000) / 100);
       break;
 #endif
   }
