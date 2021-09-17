@@ -71,7 +71,7 @@
 #define SAMPLE_TICKS (500UL)
 
 // The scaling array output in mv at 0V input
-#define OFFSET (2600)
+#define OFFSET (2500)
 // The slope of the scale - about how many mv of input shift are
 // represented by each volt of ADC shift
 #define SCALE (6570L)
