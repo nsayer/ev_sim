@@ -182,9 +182,8 @@ volatile uint16_t last_capture, hi_period, lo_period, state_changes;
 ISR(ANA_COMP0_vect) {
   uint16_t capture = ICR1;
   uint16_t delta = capture - last_capture;
-  last_capture = capture;
-
   if (delta < NOISE_REDUCTION) return; // ignore this one
+  last_capture = capture;
 
   uint8_t state = (ACSR0A & _BV(ACO0)) != 0;
 

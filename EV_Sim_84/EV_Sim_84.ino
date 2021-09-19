@@ -199,9 +199,8 @@ volatile unsigned int state_changes, hi_period, lo_period, last_capture;
 ISR(ANA_COMP_vect) {
   unsigned int capture = ICR1;
   unsigned int delta = capture - last_capture;
-  last_capture = capture;
-
   if (delta < NOISE_REDUCTION) return; // this interval is too short. Ignore it.
+  last_capture = capture;
   
   int state = (ACSR & _BV(ACO)) != 0;
 
