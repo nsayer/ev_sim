@@ -21,7 +21,7 @@
 #include <Arduino.h>
 #include <util/atomic.h>
 
-#define VERSION "(84) 1.0"
+#define VERSION "(84) 2.0"
 
 // Hardware versions prior to 4.0 use DIGITAL_SAMPLING. 4.0 and beyond use
 // analog.
